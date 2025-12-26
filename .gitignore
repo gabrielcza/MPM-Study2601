@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+
+# VS Code
+.vscode/
+
+# 如果你以后某些项目用“项目内 .venv”，就别提交它
+.venv/
