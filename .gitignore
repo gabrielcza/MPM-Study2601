@@ -4,5 +4,5 @@ __pycache__/
 # VS Code
 .vscode/
 
-# 如果你以后某些项目用“项目内 .venv”，就别提交它
+# 后面这个venv就是为了不提交到GitHub上
 .venv/
