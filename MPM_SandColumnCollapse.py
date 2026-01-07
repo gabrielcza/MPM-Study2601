@@ -4,7 +4,25 @@ ti.init(arch=ti.gpu)
 dim=2
 n_particles = 8192
 n_grid = 128
-dx = 1 / n_grid
+dx = 1 / n_grid   
+#这里的1是指整个模拟区域的大小，而不是之后沙柱的大小，有更加通用的写法
+# --- 更好的写法 ---
+
+# 1. 定义模拟区域的大小 (eg. 一个长2米，高1米的水槽)
+#  domain_size = ti.Vector([2.0, 1.0]) 
+
+# 2. 定义分辨率 (比如 X 轴想要 256 个格子)
+#  n_grid_x = 256
+
+# 3. 动态计算 dx (网格大小)
+# dx = 长度 / 格子数
+# dx = domain_size[0] / n_grid_x  
+
+# 4. 计算 Y 轴需要多少个格子 (自动适配)
+# n_grid_y = int(domain_size[1] / dx)
+
+# 5. 定义网格场 (此时 shape 就是长方形了)
+#  grid_v = ti.Vector.field(2, dtype=float, shape=(n_grid_x, n_grid_y))
 dt = 1.5e-4    #这里需要考虑时间不长，CFL条件
 p_rho = 1
 p_vol = (dx * 0.5) ** 2
@@ -41,11 +59,11 @@ def substep():
         grid_m[i, j] = 0
         grid_old_v[i, j] = [0, 0] # 清空旧速度缓存
 
-    # [B] P2G: 粒子 -> 网格 (纯 PIC 模式，无 APIC 仿射项)
+    # [B] P2G: 粒子 -> 网格 (PIC/FLIP 混合)
     for p in x:
-        base = (x[p] * (1.0 / dx)).cast(int)
+        base = (x[p] * (1.0 / dx)).cast(int)   #计算粒子所在的网格单元的左下角索引,.cast(int)是向下取整的函数
         fx = x[p] * (1.0 / dx) - base.cast(float)
-        w = [0.5 * (1.5 - fx) ** 2, 0.75 - (fx - 1) ** 2, 0.5 * (fx - 0.5) ** 2]
+        w = [0.5 * (1.5 - fx) ** 2, 0.75 - (fx - 1) ** 2, 0.5 * (fx - 0.5) ** 2]   #计算B样条权重函数，二次B样条函数插值，主要插值了周围3x3个网格节点
 
         # 1. 计算粒子当前的应力 (Stress)
         # 这里逻辑和之前一样：先算 SVD，处理塑性，再算应力
