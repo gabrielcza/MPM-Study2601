@@ -69,6 +69,7 @@ def substep():
         # 这里逻辑和之前一样：先算 SVD，处理塑性，再算应力
         U, sig, V = ti.svd(F[p])
         J = 1.0
+        # SVD的就是调用ti.svd这个函数，返回U，sig，V三个矩阵，因为粒子的形变有拉伸，旋转和剪切等，但是旋转不会产生力，所以要把这些变化剥离开来
         
         # 摩尔-库伦 / Drucker-Prager 
         epsilon = ti.Vector([ti.log(sig[0, 0]), ti.log(sig[1, 1])])
