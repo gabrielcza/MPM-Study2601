@@ -91,7 +91,7 @@ def substep():
         stress = (-dt * p_vol * 4 * (1.0/dx**2)) * stress
 
         # 2. 散射到网格
-        # 注意：没有 affine @ dpos 这一项了，这就是纯 PIC 转移
+        # 这里只有PIC/FLIP的动量传递和力传递，没有质量传递
         for i, j in ti.static(ti.ndrange(3, 3)):
             offset = ti.Vector([i, j])
             dpos = (offset.cast(float) - fx) * dx
