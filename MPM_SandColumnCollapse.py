@@ -69,19 +69,24 @@ def substep():
         # 这里逻辑和之前一样：先算 SVD，处理塑性，再算应力
         U, sig, V = ti.svd(F[p])
         J = 1.0
-        # SVD的就是调用ti.svd这个函数，返回U，sig，V三个矩阵，因为粒子的形变有拉伸，旋转和剪切等，但是旋转不会产生力，所以要把这些变化剥离开来
+        # SVD的就是调用ti.svd这个函数，返回U，sig，V三个矩阵，因为粒子的形变有拉伸，旋转和剪切等，但是旋转不会产生力，所以要把这些变化剥离开来，其中sig是一个对角矩阵，包含了拉伸信息
         
-        # 摩尔-库伦 / Drucker-Prager 
-        epsilon = ti.Vector([ti.log(sig[0, 0]), ti.log(sig[1, 1])])
+        # MC/ DP
+        epsilon = ti.Vector([ti.log(sig[0, 0]), ti.log(sig[1, 1])])   
+        #这里取了log对数是为了之后把乘法关系变成加法关系，方便计算。sig[0,0]和sig[1,1]分别是x和y方向的拉伸比，但不一定是严格意义上的x和y方向，他代表的是两个正交的方向，为第一主方向和第二主方向，粒子变化最剧烈的两个轴
         trace_epsilon = epsilon.sum() + ti.log(Jp[p])
-        epsilon_hat = epsilon - (trace_epsilon / 2.0)
+        #在大变形总变形为塑性变形和弹性变形相乘，因为这里取了对数，所以是相加。另外，这里的epsilon表示的是弹性变形，既trace_epsilon表示的是总变形，为弹性变形和塑性变形相乘
+        epsilon_hat = epsilon - (trace_epsilon / 2.0)  
+        #这里的epsilon_hat表示的是去除体积变化后的形变，主要是剪切形变，偏应变。因为这里是2维，所以除以2，如果是3维就除以3
         epsilon_hat_norm = epsilon_hat.norm() + 1e-6
+        #norm是求向量的模长，这里加了一个很小的数，防止除0错误，这里的norm是算出该粒子到圆心的距离
         delta_gamma = epsilon_hat_norm + (trace_epsilon * alpha)
         if delta_gamma > 0:
             scale = 1.0 - delta_gamma / epsilon_hat_norm
             epsilon_hat *= scale
         
         epsilon_new = epsilon_hat + (trace_epsilon / 2.0)
+        #更新后的偏应变加上体积应变，得到新的总应变，这里的hat已经通过scale去除了塑性的部分，只剩下弹性的部分
         sig[0, 0] = ti.exp(epsilon_new[0])
         sig[1, 1] = ti.exp(epsilon_new[1])
         
@@ -90,13 +95,14 @@ def substep():
         stress_j2 = 2 * nu / (1 - 2 * nu) * trace_epsilon * ti.Matrix.identity(float, 2) + 2 * epsilon_new[0] * ti.Matrix([[1,0],[0,0]]) + 2 * epsilon_new[1] * ti.Matrix([[0,0],[0,1]])
         stress = (E / (1+nu)) * stress_j2
         stress = (-dt * p_vol * 4 * (1.0/dx**2)) * stress
+        # 这里的4 * (1/dx^2)是B样条二阶导数的简化系数，这里的stress其实是力密度乘以体积再乘以时间步长，得到的是冲量，之后传递给网格节点，相当于一个动量的变化量，所以在P2G阶段直接加到网格速度上
 
         # 2. 散射到网格
         # 这里只有PIC/FLIP的动量传递和力传递，没有质量传递
-        for i, j in ti.static(ti.ndrange(3, 3)):
-            offset = ti.Vector([i, j])
-            dpos = (offset.cast(float) - fx) * dx
-            weight = w[i][0] * w[j][1]
+        for i, j in ti.static(ti.ndrange(3, 3)):  # ti.static表示编译期展开循环，提升性能，这里因为用到的是二次 B样条插值，所以是3x3的范围
+            offset = ti.Vector([i, j])  #遍历邻居网格节点
+            dpos = (offset.cast(float) - fx) * dx #粒子到网格节点的距离向量
+            weight = w[i][0] * w[j][1]   #计算权重
             
             # 动量传递：仅 mass * velocity
             grid_v[base + offset] += weight * (p_rho * v[p]) 
@@ -107,7 +113,7 @@ def substep():
     # [C] Grid Operations: 网格更新
     for i, j in grid_m:
         if grid_m[i, j] > 0:
-            grid_v[i, j] /= grid_m[i, j] # 动量 -> 速度
+            grid_v[i, j] /= grid_m[i, j] # 动量 -> 速度，在这之前的grid_v其实是动量，所以要变成速度需要除以质量
             
             # **关键点**：在施加重力前，保存一下当前的网格速度
             # 这是 FLIP 计算 delta v 所需要的 "旧速度"
@@ -144,10 +150,11 @@ def substep():
             g_v_old = grid_old_v[base + offset]  # 受力前的网格速度
             
             # 1. PIC 部分：直接插值当前网格速度
-            v_pic += weight * g_v_new
+            v_pic += weight * g_v_new   #PIC只做速度平均
             
             # 2. FLIP 部分：累加网格的速度变化量 (dv = new - old)
-            v_flip += weight * (g_v_new - g_v_old)
+            v_flip += weight * (g_v_new - g_v_old)   #FLIP会加上新的速度
+            
             
             # 3. 计算速度梯度 (用于更新形变 F)
             # 这里的 4 * (1/dx) 是 B-Spline 导数项的简化系数
